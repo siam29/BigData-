@@ -1,0 +1,5 @@
+env/
+amenity_category.json
+expedia-lodging-amenities-en_us-1-all.jsonl
+amenities_sample_output.json
+spark-warehouse
