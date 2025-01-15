@@ -29,27 +29,16 @@ def initialize_spark_session(app_name="IcebergLocalDevelopment"):
             .config("spark.sql.catalog.local.warehouse", "spark-warehouse/iceberg")
             .getOrCreate()
         )
-        print("Spark session initialized successfully.")
         elapsed_time = timeit.default_timer() - start_time
-        print(f"Spark session initialization time: {elapsed_time} seconds")
+        print(f"Spark session initialized in {elapsed_time:.4f} seconds.")
         return spark
     except Exception as e:
-        print(f"Error initializing Spark session: {e}")
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Error initializing Spark session in {elapsed_time:.4f} seconds: {e}")
         return None
 
 
 def load_json_file(spark, file_path, multiline=True):
-    """
-    Load a JSON file into a Spark DataFrame and record the time taken.
-
-    Args:
-        spark (SparkSession): Spark session instance.
-        file_path (str): Path to the JSON file.
-        multiline (bool): Whether the JSON file is multiline.
-
-    Returns:
-        DataFrame or None: The loaded DataFrame, or None if an error occurred.
-    """
     try:
         start_time = timeit.default_timer()
         df = spark.read.option("multiline", str(multiline).lower()).json(file_path)
@@ -62,11 +51,10 @@ def load_json_file(spark, file_path, multiline=True):
         return None
 
 
-
-# Extract unique amenities
 def extract_unique_amenities(df, column_name):
     try:
-        return (
+        start_time = timeit.default_timer()
+        unique_amenities = (
             df.select(column_name)
             .rdd.flatMap(lambda row: row[column_name] if row[column_name] else [])
             .flatMap(lambda amenities: amenities if isinstance(amenities, list) else [amenities])
@@ -74,27 +62,34 @@ def extract_unique_amenities(df, column_name):
             .distinct()
             .collect()
         )
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Successfully extracted unique amenities from column '{column_name}' in {elapsed_time:.4f} seconds.")
+        return unique_amenities
     except Exception as e:
-        print(f"Error extracting unique amenities from column '{column_name}': {e}")
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Error extracting unique amenities from column '{column_name}' in {elapsed_time:.4f} seconds: {e}")
         return []
 
 
-# Map amenities to categories
 def map_amenities_to_categories(amenities_list, category_mapping):
     try:
+        start_time = timeit.default_timer()
         mapped_amenities = []
         for amenity in amenities_list:
             if amenity in category_mapping:
                 mapped_amenities.append([amenity, category_mapping[amenity]])
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Successfully mapped amenities to categories in {elapsed_time:.4f} seconds.")
         return mapped_amenities
     except Exception as e:
-        print(f"Error mapping amenities to categories: {e}")
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Error mapping amenities to categories in {elapsed_time:.4f} seconds: {e}")
         return []
 
 
-# Create a DataFrame for categorized amenities
 def create_amenities_dataframe(spark, combined_amenities, category_mapping, human_readable_values):
     try:
+        start_time = timeit.default_timer()
         category_amenities = {}
         for amenity in combined_amenities:
             if amenity in category_mapping:
@@ -112,15 +107,18 @@ def create_amenities_dataframe(spark, combined_amenities, category_mapping, huma
         df = spark.createDataFrame(rows)
         df = df.withColumn("themes", lit(human_readable_values))
         df = df.withColumn("amenities", transform("amenities", lambda x: initcap(x)))
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Successfully created amenities DataFrame in {elapsed_time:.4f} seconds.")
         return df
     except Exception as e:
-        print(f"Error creating amenities DataFrame: {e}")
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Error creating amenities DataFrame in {elapsed_time:.4f} seconds: {e}")
         return None
 
 
-# Create Iceberg table and write data
 def write_to_iceberg_table(spark, df, table_name="local.siamdb.iceberg_table"):
     try:
+        start_time = timeit.default_timer()
         spark.sql(f"DROP TABLE IF EXISTS {table_name}")
         print("-> Successfully dropped the existing Iceberg table (if it existed).")
         spark.sql(
@@ -140,46 +138,41 @@ def write_to_iceberg_table(spark, df, table_name="local.siamdb.iceberg_table"):
         print("-> Iceberg table created successfully.")
         df.write.format("iceberg").mode("append").saveAsTable(table_name)
         print("-> Data written to Iceberg table successfully.")
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Data written to Iceberg table in {elapsed_time:.4f} seconds.")
     except Exception as e:
-        print(f"Error while writing data to the Iceberg table: {e}")
+        elapsed_time = timeit.default_timer() - start_time
+        print(f"Error while writing data to the Iceberg table in {elapsed_time:.4f} seconds: {e}")
 
 
 def main():
-    # Initialize Spark Session
     spark = initialize_spark_session()
     if not spark:
         return
 
-    # Load data
     df1 = load_json_file(spark, "amenities_sample_output.json")
     df2 = load_json_file(spark, "amenity_category.json")
     df3 = load_json_file(spark, "expedia-lodging-amenities-en_us-1-all.jsonl", multiline=False)
 
-    # Extract unique amenities
     property_amenities = extract_unique_amenities(df3, "propertyAmenities")
     room_amenities = extract_unique_amenities(df3, "roomAmenities")
     combined_amenities = list(set(property_amenities + room_amenities))
 
-    # Map amenities to categories
     with open("amenity_category.json", "r") as f:
         category_mapping = json.load(f)
     amenities_with_categories = map_amenities_to_categories(combined_amenities, category_mapping)
 
-    # Create human-readable unique values
     exploded_df = df3.select(explode(df3.popularAmenities).alias("value"))
     transformed_df = exploded_df.select(
         initcap(regexp_replace("value", "_", "")).alias("readable_value")
     )
     human_readable_values = transformed_df.agg(collect_set("readable_value").alias("unique_list")).first()["unique_list"]
 
-    # Create categorized amenities DataFrame
     amenities_df = create_amenities_dataframe(spark, combined_amenities, category_mapping, human_readable_values)
     amenities_df.show(truncate=False)
 
-    # Write data to Iceberg table
     write_to_iceberg_table(spark, amenities_df)
 
-    # Read back and display Iceberg table content
     df2 = spark.sql("SELECT * FROM local.siamdb.iceberg_table")
     df2.show(truncate=False)
 
