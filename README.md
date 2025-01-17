@@ -34,10 +34,23 @@ Python Libraries:
 - timeit
 
 ### How to Run 
+There is an environment in this zip file at first we need to activate it.
+- Unzip this file
+- Go to Assignment-2 directory
+```
+cd Assignment-2/
+```
+```
+source env/bin/activate
+```
+Install the required Python libraries. If your PC not previously installed pyspark follow this command.
+```
+pip install pyspark
+```
+run this file
 ```
 python3 main.py
 ```
-
 
 ### Project Overview
 **This project performs the following tasks:**
